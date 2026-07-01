@@ -221,12 +221,12 @@
     <a href="#" class="nav-item" onclick="switchTab('settings', this)"><span class="nav-icon">⚙️</span><span>设置</span></a>
   </div>
 
-  <script>
+ <script>
     /* =========================================================
-       1. 数据库定义与底层基础数据初始化
+       1. 数据库定义与底层基础数据初始化（🚀 安全升级：全面防御死锁挂起）
     ========================================================= */
     const DB_NAME = 'PantryCycleUltimateDB';
-    const DB_VERSION = 1;
+    const DB_VERSION = 2; // 🚀 核心修复：升级至版本 2，迫使浏览器补齐缺失的数据库抽屉！
     let db;
 
     const defaultCategories = [
@@ -256,18 +256,28 @@
     };
 
     function initDB() {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = e => {
           const d = e.target.result;
-          d.createObjectStore('recipes', { keyPath: 'id' });
-          d.createObjectStore('categories', { keyPath: 'id' });
-          d.createObjectStore('settings', { keyPath: 'id' });
+          // 防御性创建：缺什么抽屉就补什么抽屉
+          if (!d.objectStoreNames.contains('recipes')) d.createObjectStore('recipes', { keyPath: 'id' });
+          if (!d.objectStoreNames.contains('categories')) d.createObjectStore('categories', { keyPath: 'id' });
+          if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings', { keyPath: 'id' });
         };
         req.onsuccess = async e => {
           db = e.target.result;
-          await seedDefaultData();
-          resolve();
+          try {
+            await seedDefaultData();
+            resolve();
+          } catch (err) {
+            console.error("填充初始数据失败:", err);
+            reject(err);
+          }
+        };
+        req.onerror = e => {
+          console.error("无法打开IndexedDB数据库:", e.target.error);
+          reject(e.target.error);
         };
       });
     }
@@ -281,37 +291,54 @@
       if (!set) {
         await dbPut('settings', { id: 'app_config', settings: appState.settings, phaseDetails: defaultPhaseDetails });
       } else {
-        appState.settings = set.settings;
+        appState.settings = set.settings || appState.settings;
         appState.phaseDetails = set.phaseDetails || defaultPhaseDetails;
       }
     }
 
+    // 🚀 安全升级：对所有底层数据库操作加装防崩溃“御盾”
     function dbPut(store, data) {
-      return new Promise(r => {
-        const tx = db.transaction(store, 'readwrite');
-        tx.objectStore(store).put(data);
-        tx.oncomplete = () => r();
+      return new Promise((resolve, reject) => {
+        try {
+          if (!db) throw new Error("数据库未就绪");
+          const tx = db.transaction(store, 'readwrite');
+          tx.objectStore(store).put(data);
+          tx.oncomplete = () => resolve();
+          tx.onerror = (e) => reject(e.target.error);
+        } catch (e) { reject(e); }
       });
     }
     function dbGetAll(store) {
-      return new Promise(r => {
-        const tx = db.transaction(store, 'readonly');
-        const req = tx.objectStore(store).getAll();
-        req.onsuccess = () => r(req.result);
+      return new Promise((resolve, reject) => {
+        try {
+          if (!db) throw new Error("数据库未就绪");
+          const tx = db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          tx.onerror = (e) => reject(e.target.error);
+        } catch (e) { resolve([]); } // 崩溃时返回空数组，绝不挂起主线程
       });
     }
     function dbGet(store, id) {
-      return new Promise(r => {
-        const tx = db.transaction(store, 'readonly');
-        const req = tx.objectStore(store).get(id);
-        req.onsuccess = () => r(req.result);
+      return new Promise((resolve, reject) => {
+        try {
+          if (!db) throw new Error("数据库未就绪");
+          const tx = db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).get(id);
+          req.onsuccess = () => resolve(req.result);
+          tx.onerror = (e) => reject(e.target.error);
+        } catch (e) { resolve(null); }
       });
     }
     function dbDelete(store, id) {
-      return new Promise(r => {
-        const tx = db.transaction(store, 'readwrite');
-        tx.objectStore(store).delete(id);
-        tx.oncomplete = () => r();
+      return new Promise((resolve, reject) => {
+        try {
+          if (!db) throw new Error("数据库未就绪");
+          const tx = db.transaction(store, 'readwrite');
+          tx.objectStore(store).delete(id);
+          tx.oncomplete = () => resolve();
+          tx.onerror = (e) => reject(e.target.error);
+        } catch (e) { reject(e); }
       });
     }
 
@@ -319,25 +346,31 @@
        2. 生理周期算法核心逻辑与全展开显示
     ========================================================= */
     function calculateCurrentCycle() {
-      const start = new Date(appState.settings.startDate).getTime();
-      const now = new Date().setHours(0,0,0,0);
-      const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-      
-      const totalCycle = Number(appState.settings.p1) + Number(appState.settings.p2) + Number(appState.settings.p3) + Number(appState.settings.p4);
-      let currentDay = (diffDays % totalCycle) + 1;
-      if (currentDay <= 0) currentDay += totalCycle;
+      try {
+        const start = new Date(appState.settings.startDate).getTime();
+        const now = new Date().setHours(0,0,0,0);
+        const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+        
+        const totalCycle = Number(appState.settings.p1) + Number(appState.settings.p2) + Number(appState.settings.p3) + Number(appState.settings.p4);
+        if (!totalCycle || isNaN(totalCycle)) return { day: 1, phaseNum: 1, totalCycle: 28 };
 
-      let phaseNum = 1;
-      const t1 = Number(appState.settings.p1);
-      const t2 = t1 + Number(appState.settings.p2);
-      const t3 = t2 + Number(appState.settings.p3);
+        let currentDay = (diffDays % totalCycle) + 1;
+        if (currentDay <= 0) currentDay += totalCycle;
 
-      if (currentDay <= t1) phaseNum = 1;
-      else if (currentDay <= t2) phaseNum = 2;
-      else if (currentDay <= t3) phaseNum = 3;
-      else phaseNum = 4;
+        let phaseNum = 1;
+        const t1 = Number(appState.settings.p1);
+        const t2 = t1 + Number(appState.settings.p2);
+        const t3 = t2 + Number(appState.settings.p3);
 
-      return { day: currentDay, phaseNum, totalCycle };
+        if (currentDay <= t1) phaseNum = 1;
+        else if (currentDay <= t2) phaseNum = 2;
+        else if (currentDay <= t3) phaseNum = 3;
+        else phaseNum = 4;
+
+        return { day: currentDay, phaseNum, totalCycle };
+      } catch (e) {
+        return { day: 1, phaseNum: 1, totalCycle: 28 };
+      }
     }
 
     async function updateHomeUI() {
@@ -345,9 +378,9 @@
       document.getElementById('ui-day').innerText = day;
       
       const phaseNames = { 1: "阶段1: 月经期＋卵泡早期", 2: "阶段2: 排卵期", 3: "阶段3: 排卵后低激素期", 4: "阶段4: 黄体期" };
-      document.getElementById('ui-phase').innerText = phaseNames[phaseNum];
+      document.getElementById('ui-phase').innerText = phaseNames[phaseNum] || "未知阶段";
       
-      const detail = appState.phaseDetails[phaseNum];
+      const detail = appState.phaseDetails[phaseNum] || defaultPhaseDetails[1];
       document.getElementById('ui-phase-brief').innerHTML = `
         <div style="font-size:0.85rem; line-height:1.5; color:var(--text);">
           <p style="margin-bottom:4px;"><b>💡 阶段简介：</b>${detail.intro}</p>
@@ -365,7 +398,7 @@
 
     function renderRandomRecommendations(recipes) {
       const container = document.getElementById('home-random-recommendations');
-      if (recipes.length === 0) {
+      if (!recipes || recipes.length === 0) {
         container.innerHTML = '<p style="color:var(--sub); font-size:0.85rem; padding:10px;">还没有录入任何菜谱，快点击“菜谱”页面右下角去录入吧！</p>';
         return;
       }
@@ -408,7 +441,7 @@
 
     function openPhaseDetailModal() {
       const { phaseNum } = calculateCurrentCycle();
-      const detail = appState.phaseDetails[phaseNum];
+      const detail = appState.phaseDetails[phaseNum] || defaultPhaseDetails[1];
       
       document.getElementById('phase-detail-title').innerText = `阶段 ${phaseNum} 专属自定义及建议`;
       document.getElementById('edit-phase-intro').value = detail.intro;
@@ -551,7 +584,7 @@
       const tag = prompt("请输入新食材标签名称 (例如: 沙拉酱):");
       if (!tag) return;
       const cat = await dbGet('categories', catId);
-      if (!cat.tags.includes(tag)) {
+      if (cat && !cat.tags.includes(tag)) {
         cat.tags.push(tag);
         await dbPut('categories', cat);
         renderPantryTags();
@@ -602,12 +635,13 @@
     }
 
     /* =========================================================
-       7. 菜谱网格流渲染与交互详情页（成功闭合被截断代码）
+       7. 菜谱网格流渲染与交互详情页
     ========================================================= */
     function renderRecipeGrid(recipes, containerId, showMatch = false) {
       const container = document.getElementById(containerId);
+      if (!container) return;
       container.innerHTML = '';
-      if (recipes.length === 0) {
+      if (!recipes || recipes.length === 0) {
         container.innerHTML = '<p style="color:var(--sub); font-size:0.85rem; padding:10px;">暂无匹配菜谱</p>';
         return;
       }
@@ -654,9 +688,9 @@
       if (r.image) { img.src = r.image; img.style.display = 'block'; } else { img.style.display = 'none'; }
       
       const ingContainer = document.getElementById('detail-recipe-ingredients');
-      ingContainer.innerHTML = r.ingredients.map(i => `<span class="tag">${i}</span>`).join('') || '无';
+      ingContainer.innerHTML = (r.ingredients || []).map(i => `<span class="tag">${i}</span>`).join('') || '无';
       const phaseContainer = document.getElementById('detail-recipe-phases');
-      phaseContainer.innerHTML = r.phases.map(p => `<span class="tag phase-tag">阶段${p}</span>`).join('') || '通用';
+      phaseContainer.innerHTML = (r.phases || []).map(p => `<span class="tag phase-tag">阶段${p}</span>`).join('') || '通用';
 
       document.getElementById('detail-recipe-steps').innerText = r.steps || "未填写步骤";
       document.getElementById('detail-recipe-notes').innerText = r.notes || "无备注";
@@ -692,7 +726,7 @@
     }
 
     /* =========================================================
-       8. 菜谱表单逻辑 + 🚀 核心升级：图片高保真智能压限舱
+       8. 菜谱表单逻辑 + 🚀 图片高保真智能压限舱
     ========================================================= */
     async function openRecipeForm(id = null) {
       appState.editingRecipeId = id;
@@ -703,7 +737,6 @@
       document.getElementById('form-recipe-img').value = '';
       document.getElementById('form-recipe-preview').style.display = 'none';
 
-      // 动态生成可供选取的食材大池子
       const pool = document.getElementById('form-recipe-ingredients-pool');
       pool.innerHTML = '';
       const categories = await dbGetAll('categories');
@@ -725,7 +758,6 @@
         });
       });
 
-      // 初始化表单内部的生理阶段小标签选择器
       document.querySelectorAll('#form-phase-tags-container .phase-tag').forEach(el => {
         el.classList.remove('selected');
         el.onclick = () => {
@@ -743,30 +775,32 @@
       if (id) {
         document.getElementById('recipe-form-title').innerText = "编辑食谱";
         const r = await dbGet('recipes', id);
-        document.getElementById('form-recipe-name').value = r.name;
-        document.getElementById('form-recipe-steps').value = r.steps || '';
-        document.getElementById('form-recipe-notes').value = r.notes || '';
-        
-        if(r.image) {
-          appState.formImageBase64 = r.image;
-          const prev = document.getElementById('form-recipe-preview');
-          prev.src = r.image;
-          prev.style.display = 'block';
+        if (r) {
+          document.getElementById('form-recipe-name').value = r.name;
+          document.getElementById('form-recipe-steps').value = r.steps || '';
+          document.getElementById('form-recipe-notes').value = r.notes || '';
+          
+          if(r.image) {
+            appState.formImageBase64 = r.image;
+            const prev = document.getElementById('form-recipe-preview');
+            prev.src = r.image;
+            prev.style.display = 'block';
+          }
+
+          (r.ingredients || []).forEach(i => {
+            appState.formIngredients.add(i);
+            Array.from(pool.children).forEach(child => {
+              if(child.innerText === i) child.classList.add('selected');
+            });
+          });
+
+          (r.phases || []).forEach(p => {
+            appState.formPhases.add(p);
+            document.querySelectorAll('#form-phase-tags-container .phase-tag').forEach(el => {
+              if(el.getAttribute('data-val') === p) el.classList.add('selected');
+            });
+          });
         }
-
-        r.ingredients.forEach(i => {
-          appState.formIngredients.add(i);
-          Array.from(pool.children).forEach(child => {
-            if(child.innerText === i) child.classList.add('selected');
-          });
-        });
-
-        r.phases.forEach(p => {
-          appState.formPhases.add(p);
-          document.querySelectorAll('#form-phase-tags-container .phase-tag').forEach(el => {
-            if(el.getAttribute('data-val') === p) el.classList.add('selected');
-          });
-        });
       } else {
         document.getElementById('recipe-form-title').innerText = "新增食谱";
         document.getElementById('form-recipe-name').value = '';
@@ -781,9 +815,10 @@
       document.getElementById('modal-recipe-form').style.display = 'none'; 
     }
 
-    // 🚀 核心安全机制：拦截拍照上传，在前端用 Canvas 将大图无感等比高压压缩，解决开机白屏的根本大坑
     function listenAndCompressImage() {
-      document.getElementById('form-recipe-img').addEventListener('change', function(e) {
+      const imgInput = document.getElementById('form-recipe-img');
+      if (!imgInput) return;
+      imgInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
         
@@ -794,7 +829,7 @@
             const canvas = document.createElement('canvas');
             let width = img.width;
             let height = img.height;
-            const MAX_SIZE = 600; // 将图片最大边锁死在 600 像素，确保画质清晰的同时体积降低 100 倍！
+            const MAX_SIZE = 600;
             
             if (width > height) {
               if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
@@ -807,7 +842,6 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
             
-            // 导出为体积极度精简的 jpeg 格式文件字符串
             appState.formImageBase64 = canvas.toDataURL('image/jpeg', 0.7);
             const preview = document.getElementById('form-recipe-preview');
             preview.src = appState.formImageBase64;
@@ -846,14 +880,15 @@
     }
 
     /* =========================================================
-       9. 顶层全局视图流控制
+       9. 顶层全局视图流控制与异步启动引擎
     ========================================================= */
     function switchTab(tabId, el) {
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       
-      document.getElementById('view-' + tabId).classList.add('active');
-      el.classList.add('active');
+      const targetView = document.getElementById('view-' + tabId);
+      if (targetView) targetView.classList.add('active');
+      if (el) el.classList.add('active');
       
       if(tabId === 'home') updateHomeUI();
       if(tabId === 'pantry') renderPantryTags();
@@ -861,31 +896,32 @@
       if(tabId === 'settings') initSettingsView();
     }
 
-    // 🚀 全局核心进化：首屏非阻塞渲染驱动器。允许 DOM 骨架瞬间秒开，告别原版的八秒白屏
+    // 首屏非阻塞渲染驱动器：按严谨顺序引导启动，防死锁
     window.addEventListener('DOMContentLoaded', () => {
       setTimeout(async () => {
         try {
-          // 1. 先把数据库老老实实初始化完毕
+          // 1. 先把数据库升到版本2并完全初始化
           await initDB();
           
-          // 2. 安全检查：如果 settings 还没加载成功，塞入今天作为保底日期，防止后续计算崩溃
-          if (!appState.settings || !appState.settings.startDate) {
-            appState.settings = { startDate: new Date().toISOString().split('T')[0], p1: 7, p2: 5, p3: 5, p4: 11 };
+          // 2. 注入第一版基础安全兜底设置（防止新用户因为没有 settings 导致 calculate 算出来为 NaN）
+          const checkConfig = await dbGet('settings', 'app_config');
+          if (checkConfig && checkConfig.settings) {
+            appState.settings = checkConfig.settings;
+            appState.phaseDetails = checkConfig.phaseDetails || defaultPhaseDetails;
           }
           
-          // 3. 先更新主页 UI（计算经期）
+          // 3. 驱动首页计算
           await updateHomeUI();
           
-          // 4. 再初始化设置页面和图片监听
+          // 4. 激活配置与图片压缩监听
           initSettingsView();
           listenAndCompressImage();
           
         } catch (error) {
-          console.error("启动引擎发生错误:", error);
-          // 兜底警报，如果真有错误，不至于死无葬身之地
-          document.getElementById('ui-phase').innerText = "数据初始化失败，请刷新";
+          console.error("启动引擎拦截到错误:", error);
+          document.getElementById('ui-phase').innerText = "主程序已启动安全兜底";
         }
-      }, 60); // 留出 60 毫秒给浏览器渲染 UI 皮肤，实现体感上的“零延迟秒开”！
+      }, 60); 
     });
   </script>
 </body>
