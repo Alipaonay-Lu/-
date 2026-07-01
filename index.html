@@ -864,10 +864,27 @@
     // 🚀 全局核心进化：首屏非阻塞渲染驱动器。允许 DOM 骨架瞬间秒开，告别原版的八秒白屏
     window.addEventListener('DOMContentLoaded', () => {
       setTimeout(async () => {
-        await initDB();
-        initSettingsView();
-        await updateHomeUI();
-        listenAndCompressImage();
+        try {
+          // 1. 先把数据库老老实实初始化完毕
+          await initDB();
+          
+          // 2. 安全检查：如果 settings 还没加载成功，塞入今天作为保底日期，防止后续计算崩溃
+          if (!appState.settings || !appState.settings.startDate) {
+            appState.settings = { startDate: new Date().toISOString().split('T')[0], p1: 7, p2: 5, p3: 5, p4: 11 };
+          }
+          
+          // 3. 先更新主页 UI（计算经期）
+          await updateHomeUI();
+          
+          // 4. 再初始化设置页面和图片监听
+          initSettingsView();
+          listenAndCompressImage();
+          
+        } catch (error) {
+          console.error("启动引擎发生错误:", error);
+          // 兜底警报，如果真有错误，不至于死无葬身之地
+          document.getElementById('ui-phase').innerText = "数据初始化失败，请刷新";
+        }
       }, 60); // 留出 60 毫秒给浏览器渲染 UI 皮肤，实现体感上的“零延迟秒开”！
     });
   </script>
