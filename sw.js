@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pantry-cycle-v2';
+const CACHE_NAME = 'pantry-cycle-v2.1';
 const ASSETS = ['./index.html', './manifest.json'];
 
 self.addEventListener('install', e => {
