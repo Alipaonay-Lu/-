@@ -647,6 +647,10 @@
     async function loadAllRecipesPage() {
       let recipes = await dbGetAll('recipes');
       if (appState.onlyShowFavorites) { recipes = recipes.filter(r => r.isFavorite); }
+
+      // 🔄 在这里加一行：把获取到的食谱数组进行反转（reverse）
+  recipes.reverse();
+      
       renderRecipeGrid(recipes, 'all-recipes-list');
     }
 
